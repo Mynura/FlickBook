@@ -753,6 +753,56 @@ String EpubParser::getCoverPath(String book)
 //     }
 // }
 
+// Convertit une chaîne UTF-8 en Latin-1 / ISO-8859-1 (1 octet par caractère).
+// Nécessaire car les polices GFX embarquées (Inkplate) n'ont qu'une plage de
+// glyphes contiguë indexée par la valeur brute de l'octet, et ne décodent pas
+// l'UTF-8 : un caractère accentué comme "é" arrive en 2 octets (0xC3 0xA9) et
+// chacun est traité comme un caractère séparé -> case vide ou glyphe faux.
+// Les points de code U+0080-U+00FF (Latin-1 Supplement, tous les accents
+// français) ont la même valeur numérique en Latin-1 qu'en Unicode, d'où la
+// conversion directe ci-dessous. Les caractères hors de cette plage (non
+// nécessaires pour le français) deviennent '?'. Il faut regénérer les polices
+// (Fonts/*.h) avec la plage 0x20-0xFF pour que les glyphes correspondants
+// existent réellement (voir l'outil "font converter" d'Inkplate).
+static String utf8ToLatin1(const String &in)
+{
+    String out;
+    out.reserve(in.length());
+    size_t i = 0;
+    while (i < in.length())
+    {
+        uint8_t b0 = (uint8_t)in[i];
+        if (b0 < 0x80)
+        {
+            out += (char)b0;
+            i += 1;
+        }
+        else if ((b0 & 0xE0) == 0xC0 && i + 1 < in.length())
+        {
+            uint8_t b1 = (uint8_t)in[i + 1];
+            uint16_t codepoint = ((b0 & 0x1F) << 6) | (b1 & 0x3F);
+            out += (codepoint <= 0xFF) ? (char)codepoint : '?';
+            i += 2;
+        }
+        else if ((b0 & 0xF0) == 0xE0 && i + 2 < in.length())
+        {
+            out += '?'; // point de code > 0xFF (ex: emoji, CJK, etc.), hors Latin-1
+            i += 3;
+        }
+        else if ((b0 & 0xF8) == 0xF0 && i + 3 < in.length())
+        {
+            out += '?';
+            i += 4;
+        }
+        else
+        {
+            // octet de continuation isolé / séquence invalide -> on saute
+            i += 1;
+        }
+    }
+    return out;
+}
+
 // Non-recursive streaming extractor (slice-aware)
 // Traverses descendants of 'element' (expected <body>) without recursion.
 // Counts all emitted characters (including formatting markup) in globalIndex.
@@ -829,7 +879,8 @@ void EpubParser::extractTextFromElement(tinyxml2::XMLElement *element,
         if (n->ToText())
         {
             String text = n->Value();
-            sanitize(text);
+            sanitize(text); // remplace guillemets/tirets/points de suspension "fantaisie" (UTF-8 multi-octets)
+            text = utf8ToLatin1(text); // ramène les accents restants (é, è, ç...) à 1 octet, compatible GFXfont
             appendSlice(text);
             stack.pop_back();
             continue;

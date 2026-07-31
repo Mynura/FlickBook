@@ -28,12 +28,16 @@ void UIManager::processTextBlock(
     size_t consumedFromInput = 0;
 
     // Serial.println("ProcessTextBlock Input txt: "+String(text));
-    auto flushCurrentLine = [&](int idx)
+    auto flushCurrentLine = [&](int idx, bool forcePrint = false)
     {
         int lineHeight = inHeader ? headerLineHeight : normalLineHeight;
         if (!currentLine.isEmpty())
         {
-            if (remainingHeight < lineHeight)
+            // forcePrint est utilisé pour le tout dernier flush, en fin de texte :
+            // il n'y a alors pas de "page suivante" à laquelle reporter cette ligne
+            // dans le cadre de cet appel, donc on l'imprime même si elle dépasse
+            // légèrement remainingHeight, plutôt que de la perdre silencieusement.
+            if (!forcePrint && remainingHeight < lineHeight)
             {
                 // Notify with raw characters consumed so far from the source string
                 onPageBreak(consumedFromInput);
@@ -185,8 +189,10 @@ void UIManager::processTextBlock(
 
     if (!word.isEmpty())
         currentLine += word + " ";
-    flushCurrentLine(text.length()); // last line; ignore break signal here intentionally
-                                     // At end, we don't force page break; caller can interpret final page char count if needed
+    flushCurrentLine(text.length(), /*forcePrint=*/true); // dernière ligne : on l'imprime toujours,
+                                                            // il n'y a pas de page suivante à laquelle
+                                                            // la reporter dans le cadre de cet appel
+                                                            // At end, we don't force page break; caller can interpret final page char count if needed
 }
 
 TextRenderResult UIManager::renderTextBlockSection(
